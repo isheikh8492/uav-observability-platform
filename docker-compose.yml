@@ -1,0 +1,47 @@
+services:
+  # PX4 SITL - Software In The Loop simulator
+  # Runs PX4 autopilot firmware in headless mode
+  px4-sitl:
+    build:
+      context: ./apps/px4-sitl
+      dockerfile: Dockerfile
+    container_name: px4-sitl
+    ports:
+      # MAVLink GCS port - PX4 listens here for ground control connections
+      # QGC connects via UDP to localhost:18570; PX4 sees packet, registers GCS,
+      # then sends telemetry back to the source address (port 14550 on QGC's side)
+      - "18570:18570/udp"
+      # Telemetry receive port - reserved for backend/QGC bidirectional comms
+      - "14550:14550/udp"
+    environment:
+      - PX4_HOME_LAT=47.3977
+      - PX4_HOME_LON=8.5456
+      - PX4_HOME_ALT=488
+      # Selects SIH quadcopter airframe (10040) - clears preflight warnings
+      # SIH = Simulator-In-Hardware (headless, no Gazebo needed)
+      # See airframes list: /px4/build/px4_sitl_default/etc/init.d-posix/airframes/
+      - PX4_SYS_AUTOSTART=10040
+      - PX4_SIM_MODEL=sihsim_quadx
+    # Inject params via PX4's parameter system before relevant modules start:
+    # - SDLOG_MODE=-1 → disables logger file output (loaded into rc.logging)
+    # - MAV_0_BROADCAST=1 → enables MAVLink network broadcast (loaded into rc.mavlink)
+    # We use sed to insert `param set` lines at the top of each init script.
+    command: >
+      bash -c "
+      LOGGING_SCRIPT=$$(find /px4 -name 'rc.logging' -type f 2>/dev/null | head -1) &&
+      MAVLINK_SCRIPT=$$(find /px4 -name '*rc.mavlink' -type f 2>/dev/null | head -1) &&
+      echo \"Patching: $$LOGGING_SCRIPT / $$MAVLINK_SCRIPT\" &&
+      sed -i '1i param set SDLOG_MODE -1' \"$$LOGGING_SCRIPT\" &&
+      sed -i '1i param set MAV_0_BROADCAST 1' \"$$MAVLINK_SCRIPT\" &&
+      cd /px4 && ./build/px4_sitl_default/bin/px4
+      "
+    networks:
+      - uav-network
+
+  # NOTE: Run QGroundControl natively on Windows (not in Docker)
+  # Download from: http://qgroundcontrol.com/downloads
+  # Configure in QGC: Application Settings → Comm Links → Add UDP target localhost:18570
+
+networks:
+  uav-network:
+    driver: bridge
