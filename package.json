@@ -1,0 +1,22 @@
+{
+  "name": "uav-observability-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time telemetry and observability platform for UAV autonomous systems",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "type-check": "pnpm -r run type-check",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r exec rimraf dist node_modules .turbo"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@10.23.0"
+}

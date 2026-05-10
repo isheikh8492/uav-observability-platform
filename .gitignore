@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-pnpm-lock.yaml
+
+# Lockfiles from non-pnpm tools (we use pnpm-lock.yaml as source of truth)
 yarn.lock
 package-lock.json
 
