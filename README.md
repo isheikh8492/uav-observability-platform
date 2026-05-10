@@ -10,6 +10,7 @@ A real-time telemetry and observability platform for autonomous systems, built a
 ## Quick Links
 
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System design, technology choices, why we made decisions
+- **[CHALLENGES.md](docs/CHALLENGES.md)** — Technical challenges encountered, root causes, and lessons learned
 - **[project-hand-off.md](docs/project-hand-off.md)** — Original vision & long-term direction
 
 ## Tech Stack

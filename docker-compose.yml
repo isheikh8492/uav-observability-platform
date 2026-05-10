@@ -37,6 +37,21 @@ services:
       "
     networks:
       - uav-network
+    # Disable Docker stdout/stderr capture entirely.
+    # Observability is handled in-app: the backend service ingests MAVLink
+    # and exposes structured telemetry. PX4's stdout text is just noise here.
+    logging:
+      driver: none
+    # Memory limit: prevent runaway containers from starving the host
+    # 1GB is plenty for PX4 SITL (typically uses ~200-500MB)
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    # Restart policy: only restart if it crashes, not if you stop it manually
+    restart: unless-stopped
 
   # NOTE: Run QGroundControl natively on Windows (not in Docker)
   # Download from: http://qgroundcontrol.com/downloads

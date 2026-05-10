@@ -323,12 +323,142 @@ This architecture demonstrates core concepts you'll see in real robotics/aerospa
 
 ---
 
-## Next Steps
+## Camera Feed Strategy
 
-1. ✅ Architecture & decisions locked (this document)
-2. Initialize monorepo structure & root configuration
-3. Set up `packages/types` with core telemetry interfaces
-4. Build backend: UDP listener → MAVLink parser → WebSocket broadcaster
-5. Build frontend: WebSocket client → dashboard components
-6. Create docker-compose.yml orchestrating all services
-7. Test end-to-end: PX4 SITL → backend → frontend
+The platform's "camera feed" pane is implemented via a **Geospatial Synthetic Camera** — not a mock video, not a Gazebo render, but real-world satellite imagery composed in real time from the simulated drone's GPS coordinates.
+
+### Architecture
+
+```
+PX4 SITL (Docker)
+    └─ MAVLink GPS coords (lat/lon/alt/heading)
+        ↓
+Backend (Docker)
+    └─ Geospatial Camera Service
+        ├─ Fetches Mapbox Static API tile at current coords
+        ├─ Maps drone altitude → tile zoom level
+        ├─ Maps drone yaw → tile bearing rotation
+        └─ Streams composed image to frontend
+            ↓
+Frontend
+    └─ Camera pane displays satellite view
+       (scrolls/rotates with drone motion)
+```
+
+### Why This Approach (vs. Alternatives)
+
+| Approach | Hardware-friendly | Telemetry-correlated | Realistic | Decision |
+|----------|------------------|---------------------|-----------|----------|
+| Mock MP4 loop | ✅ | ❌ | ❌ | Rejected — visibly fake |
+| Gazebo + camera plugin | ❌ (no GPU passthrough) | ✅ | ✅ | Deferred to Phase 3 (requires WSL2 setup) |
+| Three.js synthetic POV | ✅ | ✅ | ❌ | Rejected — turns the platform into a flight simulator |
+| **Geospatial synthetic camera** | ✅ | ✅ | ✅ (real satellite imagery) | **Selected** |
+
+### Trade-offs (Acknowledged)
+
+**What this provides:**
+- Real satellite imagery of the drone's simulated location
+- Responds to actual drone motion (lat/lon changes scroll the view, altitude changes zoom, heading changes rotation)
+- Matches the imagery pipeline used by real aerial-mapping drones (orthomosaic stitching, photogrammetry)
+- Works on constrained hardware
+
+**What this is NOT:**
+- A first-person forward-facing perspective (it's downward-looking aerial imagery)
+- A 3D-rendered scene with occlusion or live objects
+- A simulation of camera optics (no lens distortion, motion blur, realistic FOV)
+
+**Who this is suitable for:**
+- Aerial mapping / surveying / inspection use cases (the target domain)
+- Search & rescue scenarios with GPS-tagged imagery
+- Mission control overlays where map context matters more than first-person feel
+
+**Who this is NOT suitable for:**
+- Computer vision research requiring realistic camera optics
+- First-person operator training (where forward POV is essential)
+
+### Implementation Notes
+
+- **Tile provider:** Mapbox Static Images API (free tier: 50,000 requests/month — plenty for dev)
+- **Update rate:** ~5-10 Hz (Mapbox tiles aren't designed for 30+ FPS streaming, and aerial coverage doesn't change that fast anyway)
+- **Caching:** Tiles for visited coordinates cached in backend (saves API quota)
+- **Altitude → zoom mapping:** logarithmic — `zoom = max(14, 21 - log2(altitude + 1))`
+- **Heading → bearing:** straight pass-through from MAVLink yaw
+- **Replaceable architecture:** `VideoSource` interface in backend — `GeospatialVideoSource` implementation now, easily swapped for `GazeboRtspSource` or `RealRtspSource` later
+
+### Strategic Framing
+
+> "The camera pane uses a geospatial synthetic camera — the system fetches real satellite imagery at the drone's current GPS coordinates and composes a downward-facing aerial view that scrolls and rotates with the drone's motion. This mirrors the pipeline used by aerial mapping drones. The video source is abstracted via an interface; swapping in a real RTSP feed from Gazebo or hardware is a configuration change."
+
+This framing demonstrates: domain knowledge (aerial mapping), architectural thinking (interface design), pragmatism (working within hardware constraints), and honesty (no fake mocks).
+
+---
+
+## Observability Principle
+
+**The backend IS the observability layer. PX4's stdout is intentionally discarded.**
+
+In real autonomous systems:
+- Autopilots produce **raw telemetry** (binary streams over MAVLink/CAN/etc.) — not human-readable logs
+- Ground systems **parse, structure, store, and visualize** that telemetry
+- Operators consume **structured data** (mission state, vehicle attitude, alerts), not console output
+
+We mirror this architecture deliberately:
+- The PX4 SITL container has Docker logging **disabled** (`driver: none`)
+- All observability flows through our pipeline: MAVLink → backend parser → normalized telemetry → WebSocket → frontend
+- PX4's text stdout is the equivalent of a chip's UART debug console — useful for the embedded engineer, irrelevant to the mission operator
+
+**Implication for development:** When debugging PX4 itself (rare), temporarily re-enable Docker logging or attach to the `pxh>` shell via `docker exec -it px4-sitl bash`. For everything else, your own backend is the source of truth.
+
+---
+
+## Implementation Progress
+
+### Phase 0: Simulation Foundation ✅
+- [x] PX4 SITL containerized (Ubuntu 24.04, Python venv, headless build)
+- [x] SIH airframe configured (`SYS_AUTOSTART=10040` quadcopter X)
+- [x] MAVLink network broadcast enabled (`MAV_0_BROADCAST=1`)
+- [x] Docker logging disabled (observability via app, not stdout)
+- [x] Resource limits set (1GB memory cap, restart policy)
+- [x] Telemetry validated end-to-end with QGroundControl
+
+### Phase 1: MVP Backend & Frontend (Next)
+- [ ] Initialize monorepo structure & root configuration
+- [ ] Set up `packages/types` with core telemetry interfaces
+- [ ] Build backend: UDP listener → MAVLink parser → WebSocket broadcaster
+- [ ] Build frontend: WebSocket client → dashboard components
+  - [ ] Map pane (Mapbox 2D with drone marker, flight path)
+  - [ ] Telemetry HUD (speed, altitude, battery, mode, GPS lock)
+  - [ ] Mini attitude indicator widget (Three.js gauge)
+  - [ ] Connection status indicators
+- [ ] Test end-to-end: PX4 SITL → backend → frontend
+
+### Phase 1B: Geospatial Synthetic Camera
+- [ ] Mapbox account + Static Images API integration
+- [ ] Backend: GeospatialVideoSource service
+  - [ ] Fetch tile at current GPS coords
+  - [ ] Altitude → zoom mapping
+  - [ ] Heading → bearing rotation
+  - [ ] In-memory tile cache (dedupe API calls)
+- [ ] Frontend: Camera pane component
+  - [ ] HUD overlays (speed, altitude, heading, LIVE indicator)
+- [ ] Define `VideoSource` interface (replaceable for Phase 3)
+
+### Phase 2: Replay & Analysis
+- [ ] Read ULog files from PX4
+- [ ] Timeline scrubbing UI
+- [ ] Estimator vs groundtruth visualization
+- [ ] Mission event timeline
+
+### Phase 3: Real-World Camera Integration (Deferred)
+- [ ] WSL2 setup (when disk space + time allow)
+- [ ] PX4 + Gazebo Harmonic native install
+- [ ] Camera plugin attached to drone model
+- [ ] RTSP bridge (Gazebo → host network)
+- [ ] Implement `GazeboRtspSource` (drop-in replacement for GeospatialVideoSource)
+- [ ] (Future) Real hardware drone: `RealRtspSource`
+
+### Phase 4: Polish (Future)
+- [ ] Mission planning interface (waypoint editing)
+- [ ] Multi-drone fleet view
+- [ ] CesiumJS 3D Earth (optional upgrade from Mapbox 2D)
+- [ ] Alert/warning system with acknowledgments
