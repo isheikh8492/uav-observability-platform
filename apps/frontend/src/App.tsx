@@ -1,17 +1,10 @@
-/**
- * Application shell.
- *
- * Phase 1 will populate this with:
- *   - Map pane (Mapbox 2D, drone marker, flight path)
- *   - Telemetry HUD (speed, altitude, battery, mode)
- *   - Mini attitude indicator
- *   - Connection status
- */
+import { Layout } from "./components/Layout.js";
+import { useTelemetry } from "./hooks/useTelemetry.js";
+import "./styles/global.css";
+
+const WS_URL = import.meta.env["VITE_WS_URL"] ?? "ws://localhost:8080";
+
 export function App() {
-  return (
-    <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1>UAV Observability Platform</h1>
-      <p>Phase 1 implementation pending — workspace initialized.</p>
-    </main>
-  );
+  useTelemetry(WS_URL);
+  return <Layout />;
 }

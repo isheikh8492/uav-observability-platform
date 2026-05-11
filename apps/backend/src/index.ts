@@ -21,11 +21,14 @@
 import { config } from "./config.js";
 import { createMavLinkListener } from "./mavlink/listener.js";
 import { startHeartbeat } from "./mavlink/heartbeat.js";
+import { MavLinkCommander } from "./mavlink/commander.js";
 import { TelemetryStore } from "./state/store.js";
 import { TelemetryWebSocketServer } from "./websocket/server.js";
+import { logger } from "./util/logger.js";
 
-console.log("[backend] starting UAV telemetry backend");
-console.log(`[backend] config:`, config);
+logger.info("[backend] starting UAV telemetry backend");
+logger.info("[backend] log file:", logger.filePath());
+logger.info("[backend] config:", config);
 
 // 1. Telemetry state aggregator
 const store = new TelemetryStore();
@@ -42,7 +45,7 @@ listener.on("heartbeat", () => {
 });
 
 listener.on("error", (err) => {
-  console.error("[mavlink] socket error:", err.message);
+  logger.error("[mavlink] socket error:", err.message);
 });
 
 // 3. Outbound heartbeat — keeps PX4 streaming to us
@@ -53,10 +56,39 @@ const stopHeartbeat = startHeartbeat({
   hz: config.heartbeatHz,
 });
 
-// 4. WebSocket server — fans out to frontends
+// 4. Commander — sends MAVLink commands over the same socket
+const commander = new MavLinkCommander({
+  socket,
+  targetHost: config.mavlinkPx4Host,
+  targetPort: config.mavlinkPx4Port,
+  store,
+});
+
+// 5. WebSocket server — fans out telemetry, accepts client commands
 const wsServer = new TelemetryWebSocketServer(config.wsPort);
 
-// 5. Broadcast loop — pushes snapshots to all clients at a steady rate
+wsServer.on("clientMessage", (msg, client) => {
+  if (msg.type !== "command") return;
+
+  const { requestId, kind, params } = msg.data;
+  commander
+    .execute(kind, params)
+    .then(() => {
+      wsServer.sendTo(client, {
+        type: "command_result",
+        data: { requestId, kind, sent: true },
+      });
+    })
+    .catch((err: Error) => {
+      logger.error(`[commander] failed to send ${kind}:`, err.message);
+      wsServer.sendTo(client, {
+        type: "command_result",
+        data: { requestId, kind, sent: false, error: err.message },
+      });
+    });
+});
+
+// 6. Broadcast loop — pushes snapshots to all clients at a steady rate
 const broadcastInterval = setInterval(() => {
   if (wsServer.clientCount === 0) return;
 
@@ -71,18 +103,18 @@ const broadcastInterval = setInterval(() => {
   });
 }, 1000 / config.broadcastHz);
 
-// 6. Graceful shutdown
+// 7. Graceful shutdown
 async function shutdown(signal: string): Promise<void> {
-  console.log(`\n[backend] received ${signal}, shutting down...`);
+  logger.info(`[backend] received ${signal}, shutting down...`);
   clearInterval(broadcastInterval);
   stopHeartbeat();
   socket.close();
   await wsServer.close();
-  console.log("[backend] shutdown complete");
+  logger.info("[backend] shutdown complete");
   process.exit(0);
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-console.log("[backend] all systems ready, awaiting telemetry...");
+logger.info("[backend] all systems ready, awaiting telemetry...");

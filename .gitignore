@@ -12,7 +12,7 @@ build/
 .next/
 out/
 
-# Logs
+# Logs (backend writes to /logs/backend.log at repo root)
 logs/
 *.log
 npm-debug.log*

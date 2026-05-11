@@ -114,17 +114,18 @@ function decodeHeartbeat(d: Record<string, unknown>): DecoderUpdate {
   // HEARTBEAT carries:
   //   base_mode bitfield (bit 7 = MAV_MODE_FLAG_SAFETY_ARMED)
   //   custom_mode (PX4-specific encoding of flight mode)
-  //   system_status (active/critical/etc)
+  //
+  // Note on inAir: HEARTBEAT's system_status doesn't reliably distinguish
+  // "armed on ground" from "actually flying" — both report ACTIVE. We default
+  // to false here and let the store override based on altitude / EXTENDED_SYS_STATE.
   const baseMode = num(d.baseMode);
   const armed = (baseMode & 0x80) !== 0; // MAV_MODE_FLAG_SAFETY_ARMED
-  const systemStatus = num(d.systemStatus);
-  const inAir = systemStatus === 4; // MAV_STATE_ACTIVE
 
   return {
     state: {
       armed,
       flightMode: decodeCustomMode(num(d.customMode)),
-      inAir,
+      inAir: false, // store will overwrite based on altitude data
     },
   };
 }

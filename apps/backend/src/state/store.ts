@@ -50,13 +50,23 @@ export class TelemetryStore {
 
   /** Returns a snapshot of the current state. */
   snapshot(): TelemetrySnapshot {
+    // Compute "in air" from altitude data. HEARTBEAT alone can't tell us:
+    // an armed drone sitting on the ground also reports MAV_STATE_ACTIVE.
+    // A 0.5m altitude OR appreciable vertical speed is a reasonable heuristic.
+    let state = this.state;
+    if (state && this.position) {
+      const aboveGround = this.position.altitudeRelative > 0.5;
+      const moving = Math.abs(this.position.verticalSpeed) > 0.5;
+      state = { ...state, inAir: aboveGround || moving };
+    }
+
     return {
       timestamp: Date.now(),
       attitude: this.attitude,
       position: this.position,
       battery: this.battery,
       gps: this.gps,
-      state: this.state,
+      state,
     };
   }
 

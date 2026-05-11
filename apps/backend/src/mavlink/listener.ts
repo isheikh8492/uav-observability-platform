@@ -8,6 +8,7 @@ import {
 import { common, minimal } from "node-mavlink";
 
 import { decode, type DecoderUpdate } from "./decoder.js";
+import { logger } from "../util/logger.js";
 
 /**
  * MAVLink message registry — maps MAVLink message IDs to TypeScript classes
@@ -20,6 +21,27 @@ import { decode, type DecoderUpdate } from "./decoder.js";
 const REGISTRY = {
   ...minimal.REGISTRY,
   ...common.REGISTRY,
+};
+
+const COMMAND_ACK_RESULT: Record<number, string> = {
+  0: "ACCEPTED",
+  1: "TEMPORARILY_REJECTED",
+  2: "DENIED",
+  3: "UNSUPPORTED",
+  4: "FAILED",
+  5: "IN_PROGRESS",
+  6: "CANCELLED",
+};
+
+const STATUS_TEXT_SEVERITY: Record<number, string> = {
+  0: "EMERGENCY",
+  1: "ALERT",
+  2: "CRITICAL",
+  3: "ERROR",
+  4: "WARNING",
+  5: "NOTICE",
+  6: "INFO",
+  7: "DEBUG",
 };
 
 export interface MavLinkListenerEvents {
@@ -86,6 +108,29 @@ export function createMavLinkListener(port: number): {
       listener.emit("heartbeat");
     }
 
+    // Log PX4's responses to our commands so we can see arm/takeoff failures.
+    // MAV_RESULT values:
+    //   0 ACCEPTED, 1 TEMPORARILY_REJECTED, 2 DENIED, 3 UNSUPPORTED,
+    //   4 FAILED, 5 IN_PROGRESS, 6 CANCELLED
+    if (msgName === "COMMAND_ACK") {
+      const cmdId = data.command;
+      const result = data.result;
+      const resultName = COMMAND_ACK_RESULT[Number(result)] ?? `UNKNOWN(${result})`;
+      logger.info(`[mavlink] COMMAND_ACK cmd=${cmdId} result=${result} (${resultName})`);
+    }
+
+    // PX4 publishes human-readable warnings/errors via STATUSTEXT (note: no
+    // underscore — MAVLink's naming is inconsistent). Failures like
+    // "Takeoff denied: ..." or "Disarmed by auto preflight" come through here.
+    if (msgName === "STATUSTEXT") {
+      const text = String(data.text ?? "").replace(/\0+$/, "").trim();
+      if (text) {
+        const sev = Number(data.severity ?? 6);
+        const sevName = STATUS_TEXT_SEVERITY[sev] ?? `SEV${sev}`;
+        logger.info(`[mavlink] STATUSTEXT [${sevName}] ${text}`);
+      }
+    }
+
     const update = decode(msgName, data);
     if (update) {
       listener.emit("telemetry", update);
@@ -101,7 +146,7 @@ export function createMavLinkListener(port: number): {
   });
 
   socket.bind(port, () => {
-    console.log(`[mavlink] listening on UDP :${port}`);
+    logger.info(`[mavlink] listening on UDP :${port}`);
   });
 
   return { listener, socket };

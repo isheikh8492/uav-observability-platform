@@ -5,6 +5,8 @@ import {
 } from "node-mavlink";
 import { minimal } from "node-mavlink";
 
+import { logger } from "../util/logger.js";
+
 const { Heartbeat, MavType, MavAutopilot, MavState, MavModeFlag } = minimal;
 
 /**
@@ -40,10 +42,12 @@ export function startHeartbeat(opts: {
   heartbeat.systemStatus = MavState.ACTIVE;
   heartbeat.mavlinkVersion = 3;
 
-  // node-mavlink's `send()` writes to a Writable stream. We adapt it
-  // to a UDP send by buffering then sending in one datagram.
+  // node-mavlink's `send()` writes to a Writable stream. The stream `write`
+  // method can be called with either (chunk, cb) or (chunk, encoding, cb);
+  // node-mavlink uses the 2-arg form.
   const writableAdapter = {
-    write(chunk: Buffer, _encoding?: string, cb?: () => void): boolean {
+    write(chunk: Buffer, encOrCb?: unknown, maybeCb?: () => void): boolean {
+      const cb = typeof encOrCb === "function" ? (encOrCb as () => void) : maybeCb;
       socket.send(chunk, targetPort, targetHost, () => cb?.());
       return true;
     },
@@ -52,12 +56,12 @@ export function startHeartbeat(opts: {
   const interval = setInterval(() => {
     send(writableAdapter as any, heartbeat, new MavLinkProtocolV2(systemId, componentId)).catch(
       (err) => {
-        console.error("[heartbeat] send failed:", err.message);
+        logger.error("[heartbeat] send failed:", err.message);
       }
     );
   }, 1000 / hz);
 
-  console.log(
+  logger.info(
     `[heartbeat] sending to ${targetHost}:${targetPort} at ${hz} Hz (systemId=${systemId})`
   );
 
