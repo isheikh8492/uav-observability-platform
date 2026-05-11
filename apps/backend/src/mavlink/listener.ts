@@ -49,6 +49,10 @@ export interface MavLinkListenerEvents {
   telemetry: (update: DecoderUpdate) => void;
   /** Emitted when a HEARTBEAT message is received (separate channel for connection tracking). */
   heartbeat: () => void;
+  /** Emitted when PX4 acknowledges one of our commands. */
+  commandAck: (ack: { cmd: number; result: number }) => void;
+  /** Emitted when PX4 publishes a human-readable status message. */
+  statusText: (msg: { severity: number; text: string }) => void;
   /** Emitted on socket errors. */
   error: (err: Error) => void;
 }
@@ -113,10 +117,11 @@ export function createMavLinkListener(port: number): {
     //   0 ACCEPTED, 1 TEMPORARILY_REJECTED, 2 DENIED, 3 UNSUPPORTED,
     //   4 FAILED, 5 IN_PROGRESS, 6 CANCELLED
     if (msgName === "COMMAND_ACK") {
-      const cmdId = data.command;
-      const result = data.result;
-      const resultName = COMMAND_ACK_RESULT[Number(result)] ?? `UNKNOWN(${result})`;
+      const cmdId = Number(data.command);
+      const result = Number(data.result);
+      const resultName = COMMAND_ACK_RESULT[result] ?? `UNKNOWN(${result})`;
       logger.info(`[mavlink] COMMAND_ACK cmd=${cmdId} result=${result} (${resultName})`);
+      listener.emit("commandAck", { cmd: cmdId, result });
     }
 
     // PX4 publishes human-readable warnings/errors via STATUSTEXT (note: no
@@ -128,6 +133,7 @@ export function createMavLinkListener(port: number): {
         const sev = Number(data.severity ?? 6);
         const sevName = STATUS_TEXT_SEVERITY[sev] ?? `SEV${sev}`;
         logger.info(`[mavlink] STATUSTEXT [${sevName}] ${text}`);
+        listener.emit("statusText", { severity: sev, text });
       }
     }
 

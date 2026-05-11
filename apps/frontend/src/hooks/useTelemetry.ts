@@ -1,17 +1,17 @@
 import { useEffect } from "react";
 import type { ServerMessage } from "@uav/types";
-import { useTelemetryStore } from "../stores/telemetryStore.js";
+import { useFleetStore } from "../stores/fleetStore.js";
 
 /**
- * Hook that connects to the backend WebSocket and pipes messages
- * into the Zustand store.
+ * Hook that connects to the backend WebSocket and pipes vehicle messages
+ * into the Zustand fleet store.
  *
  * Auto-reconnects with exponential backoff if the connection drops.
  * Mount this once at the app root (e.g., in <App />).
  */
 export function useTelemetry(url: string): void {
-  const setSnapshot = useTelemetryStore((s) => s.setSnapshot);
-  const setConnection = useTelemetryStore((s) => s.setConnection);
+  const upsertVehicle = useFleetStore((s) => s.upsertVehicle);
+  const setFleetStatus = useFleetStore((s) => s.setFleetStatus);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,23 +25,20 @@ export function useTelemetry(url: string): void {
 
       ws.addEventListener("open", () => {
         console.log(`[ws] connected to ${url}`);
-        reconnectDelayMs = 250; // reset backoff on successful connect
+        reconnectDelayMs = 250;
       });
 
       ws.addEventListener("message", (event) => {
         try {
           const msg = JSON.parse(event.data as string) as ServerMessage;
-          switch (msg.type) {
-            case "telemetry":
-              setSnapshot(msg.data);
-              break;
-            case "connection":
-              setConnection(msg.data);
-              break;
-            case "error":
-              console.error("[ws] server error:", msg.data);
-              break;
+          if (msg.type === "vehicle") {
+            upsertVehicle(msg.data);
+          } else if (msg.type === "fleet_status") {
+            setFleetStatus(msg.data);
+          } else if (msg.type === "error") {
+            console.error("[ws] server error:", msg.data);
           }
+          // command_result handled by useCommand hook (its own WS connection)
         } catch (err) {
           console.error("[ws] failed to parse message:", err);
         }
@@ -51,12 +48,10 @@ export function useTelemetry(url: string): void {
         if (cancelled) return;
         console.log(`[ws] disconnected, reconnecting in ${reconnectDelayMs}ms`);
         reconnectTimer = window.setTimeout(connect, reconnectDelayMs);
-        // Exponential backoff capped at 5 seconds
         reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5000);
       });
 
       ws.addEventListener("error", (event) => {
-        // Browsers don't expose much detail; the close event will fire next.
         console.warn("[ws] connection error", event);
       });
     };
@@ -68,5 +63,5 @@ export function useTelemetry(url: string): void {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, [url, setSnapshot, setConnection]);
+  }, [url, upsertVehicle, setFleetStatus]);
 }

@@ -147,6 +147,36 @@ export class MavLinkCommander {
         cmd._param2 = PX4_MAIN_AUTO;
         cmd._param3 = PX4_AUTO_LOITER;
         break;
+      case "goto": {
+        // MAV_CMD_DO_REPOSITION (192): repositions an in-flight vehicle.
+        //  param1: ground speed (m/s, -1 = default)
+        //  param2: bitmask (1 = change to guided)
+        //  param3: reserved
+        //  param4: yaw (rad, NaN = unchanged)
+        //  param5: latitude (degrees, NaN = current)
+        //  param6: longitude (degrees)
+        //  param7: altitude (m, MSL)
+        // For altitude we accept a relative altitude in params and convert
+        // to MSL using current position — same trick we use for takeoff.
+        const snap = this.store.snapshot();
+        const currentMsl = snap.position?.altitudeMsl ?? 0;
+        const altRelative = params.altitude;
+        // If caller supplied a relative altitude, convert. Otherwise hold current MSL.
+        const targetMsl =
+          typeof altRelative === "number" && Number.isFinite(altRelative)
+            ? currentMsl + (altRelative - (snap.position?.altitudeRelative ?? 0))
+            : currentMsl;
+
+        cmd.command = MavCmd.DO_REPOSITION;
+        cmd._param1 = -1;                              // default ground speed
+        cmd._param2 = 1;                               // change to guided
+        cmd._param3 = 0;                               // reserved
+        cmd._param4 = NaN;                             // yaw unchanged
+        cmd._param5 = params.latitude ?? NaN;
+        cmd._param6 = params.longitude ?? NaN;
+        cmd._param7 = targetMsl;
+        break;
+      }
       default:
         return null;
     }

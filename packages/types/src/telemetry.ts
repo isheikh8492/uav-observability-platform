@@ -86,7 +86,7 @@ export interface VehicleState {
 }
 
 /**
- * A complete telemetry snapshot.
+ * A complete telemetry snapshot for a single vehicle.
  *
  * This is what the backend sends to the frontend over the WebSocket.
  * Any individual field may be `null` if no MAVLink message has populated it yet
@@ -106,3 +106,6 @@ export interface TelemetrySnapshot {
   /** Latest vehicle operational state. */
   state: VehicleState | null;
 }
+
+/** Identifier used to distinguish vehicles in a fleet. */
+export type VehicleId = string;

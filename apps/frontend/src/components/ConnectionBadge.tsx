@@ -1,9 +1,16 @@
-import { useTelemetryStore } from "../stores/telemetryStore.js";
+import { useFleetStore } from "../stores/fleetStore.js";
 
-/** Live/offline indicator in the top bar. */
+/**
+ * Live/offline indicator in the top bar.
+ * Shows the connection status of the selected vehicle, or "Offline" if none.
+ */
 export function ConnectionBadge() {
-  const connected = useTelemetryStore((s) => s.connection.connected);
-  const heartbeats = useTelemetryStore((s) => s.connection.heartbeatCount);
+  const vehicle = useFleetStore((s) =>
+    s.selectedVehicleId ? s.vehicles.get(s.selectedVehicleId) : null
+  );
+
+  const connected = vehicle?.connection.connected ?? false;
+  const heartbeats = vehicle?.connection.heartbeatCount ?? 0;
 
   return (
     <div

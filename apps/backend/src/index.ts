@@ -1,28 +1,30 @@
 /**
  * Backend entry point.
  *
- * Pipeline:
+ * Pipeline (per vehicle):
  *
- *   PX4 SITL (Docker)
- *       ↓ MAVLink UDP
- *   MavLinkListener (UDP socket on :14550)
- *       ↓ decoder
- *   TelemetryStore (accumulates field updates)
- *       ↓ broadcast loop @ 20 Hz
- *   TelemetryWebSocketServer (:8080)
- *       ↓
- *   Frontend(s)
+ *   PX4 SITL → MAVLink UDP → MavLinkListener
+ *                              ↓
+ *                          VehicleSession
+ *                          ├─ TelemetryStore (raw data accumulator)
+ *                          ├─ DroneStateMachine (semantic state)
+ *                          └─ MavLinkCommander (command sender)
+ *                              ↓
+ *               broadcast loop @ 20 Hz
+ *                              ↓
+ *                       WebSocketServer
+ *                              ↓
+ *                          Frontend(s)
  *
- * Side channel:
- *   Heartbeat sender (1 Hz) → PX4 :18570
- *   Keeps the connection alive (PX4 needs to know we exist).
+ * Fleet support: VehicleSessions live inside a FleetService. Currently
+ * we wire up one session, but the rest of the stack handles N vehicles.
  */
 
 import { config } from "./config.js";
+import { FleetService } from "./fleet/fleet.js";
+import { VehicleSession } from "./fleet/vehicleSession.js";
 import { createMavLinkListener } from "./mavlink/listener.js";
 import { startHeartbeat } from "./mavlink/heartbeat.js";
-import { MavLinkCommander } from "./mavlink/commander.js";
-import { TelemetryStore } from "./state/store.js";
 import { TelemetryWebSocketServer } from "./websocket/server.js";
 import { logger } from "./util/logger.js";
 
@@ -30,25 +32,32 @@ logger.info("[backend] starting UAV telemetry backend");
 logger.info("[backend] log file:", logger.filePath());
 logger.info("[backend] config:", config);
 
-// 1. Telemetry state aggregator
-const store = new TelemetryStore();
+// 1. Fleet — currently one vehicle but the model supports many.
+const fleet = new FleetService();
 
-// 2. MAVLink ingest pipeline
+// 2. MAVLink ingest pipeline (one UDP socket per vehicle — shared for now)
 const { listener, socket } = createMavLinkListener(config.mavlinkListenPort);
 
-listener.on("telemetry", (update) => {
-  store.applyUpdate(update);
+// 3. Vehicle 1 — bound to the single MAVLink endpoint we're listening to.
+//    Adding a second drone = create another listener + session on a new port.
+const vehicle1 = new VehicleSession({
+  vehicleId: "vehicle-1",
+  name: "Vehicle 1",
+  socket,
+  targetHost: config.mavlinkPx4Host,
+  targetPort: config.mavlinkPx4Port,
+  connectionTimeoutMs: config.connectionTimeoutMs,
 });
+fleet.add(vehicle1);
 
-listener.on("heartbeat", () => {
-  store.recordHeartbeat();
-});
+// Route MAVLink events into the session
+listener.on("telemetry", (update) => vehicle1.applyTelemetry(update));
+listener.on("heartbeat", () => vehicle1.recordHeartbeat());
+listener.on("commandAck", ({ cmd, result }) => vehicle1.applyCommandAck(cmd, result));
+listener.on("statusText", ({ severity, text }) => vehicle1.applyStatusText(severity, text));
+listener.on("error", (err) => logger.error("[mavlink] socket error:", err.message));
 
-listener.on("error", (err) => {
-  logger.error("[mavlink] socket error:", err.message);
-});
-
-// 3. Outbound heartbeat — keeps PX4 streaming to us
+// 4. Outbound heartbeat — keeps PX4 streaming back to us
 const stopHeartbeat = startHeartbeat({
   socket,
   targetHost: config.mavlinkPx4Host,
@@ -56,51 +65,83 @@ const stopHeartbeat = startHeartbeat({
   hz: config.heartbeatHz,
 });
 
-// 4. Commander — sends MAVLink commands over the same socket
-const commander = new MavLinkCommander({
-  socket,
-  targetHost: config.mavlinkPx4Host,
-  targetPort: config.mavlinkPx4Port,
-  store,
-});
-
-// 5. WebSocket server — fans out telemetry, accepts client commands
+// 5. WebSocket server
 const wsServer = new TelemetryWebSocketServer(config.wsPort);
 
-wsServer.on("clientMessage", (msg, client) => {
+wsServer.on("clientMessage", (msg, client, clientSession) => {
   if (msg.type !== "command") return;
+  const { vehicleId, requestId, kind, params } = msg.data;
 
-  const { requestId, kind, params } = msg.data;
-  commander
-    .execute(kind, params)
+  const session = fleet.get(vehicleId);
+  if (!session) {
+    wsServer.sendTo(client, {
+      type: "command_result",
+      data: {
+        requestId,
+        vehicleId,
+        kind,
+        sent: false,
+        error: `Unknown vehicle: ${vehicleId}`,
+        errorCode: "UNKNOWN_VEHICLE",
+      },
+    });
+    return;
+  }
+
+  session
+    .executeCommand(kind, params, clientSession.sessionId)
     .then(() => {
       wsServer.sendTo(client, {
         type: "command_result",
-        data: { requestId, kind, sent: true },
+        data: { requestId, vehicleId, kind, sent: true },
       });
     })
-    .catch((err: Error) => {
-      logger.error(`[commander] failed to send ${kind}:`, err.message);
+    .catch((err: Error & { code?: string }) => {
+      const errorCode =
+        err.code === "VEHICLE_BUSY"
+          ? "VEHICLE_BUSY"
+          : ("SEND_FAILED" as const);
+      logger.error(
+        `[commander] failed to send ${kind} to ${vehicleId} [session ${clientSession.sessionId}]:`,
+        err.message
+      );
       wsServer.sendTo(client, {
         type: "command_result",
-        data: { requestId, kind, sent: false, error: err.message },
+        data: {
+          requestId,
+          vehicleId,
+          kind,
+          sent: false,
+          error: err.message,
+          errorCode,
+        },
       });
     });
 });
 
-// 6. Broadcast loop — pushes snapshots to all clients at a steady rate
+// Broadcast fleet status whenever the set of connected sessions changes.
+wsServer.on("sessionsChanged", () => {
+  wsServer.broadcast({
+    type: "fleet_status",
+    data: {
+      sessionCount: wsServer.clientCount,
+      sessionIds: wsServer.allSessionIds(),
+      yourSessionId: "", // each client already received their own ID at connect
+    },
+  });
+});
+
+// 6. Broadcast loop — pushes every vehicle's state to all clients
 const broadcastInterval = setInterval(() => {
   if (wsServer.clientCount === 0) return;
 
-  wsServer.broadcast({
-    type: "telemetry",
-    data: store.snapshot(),
-  });
-
-  wsServer.broadcast({
-    type: "connection",
-    data: store.connectionStatus(config.connectionTimeoutMs),
-  });
+  for (const session of fleet.list()) {
+    session.tick(); // drives timeout-based FSM transitions
+    wsServer.broadcast({
+      type: "vehicle",
+      data: session.payload(),
+    });
+  }
 }, 1000 / config.broadcastHz);
 
 // 7. Graceful shutdown

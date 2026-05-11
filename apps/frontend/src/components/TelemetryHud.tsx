@@ -1,31 +1,69 @@
-import { useTelemetryStore } from "../stores/telemetryStore.js";
+import { useFleetStore, useSelectedVehicle } from "../stores/fleetStore.js";
+import { bannerFor, bannerTone } from "../lib/vehicleActions.js";
 import { MetricCard } from "./MetricCard.js";
 import { AttitudeGauge } from "./AttitudeGauge.js";
-import { ControlPanel } from "./ControlPanel.js";
 
-/** Right-side panel showing live telemetry values. */
+/** Right-side panel showing the selected vehicle's live telemetry. */
 export function TelemetryHud() {
-  const snapshot = useTelemetryStore((s) => s.snapshot);
+  const vehicle = useSelectedVehicle();
+  const lastResult = useFleetStore((s) => s.lastCommandResult);
+  const fleetStatus = useFleetStore((s) => s.fleetStatus);
+  const dismissResult = useFleetStore((s) => s.setLastCommandResult);
 
-  if (!snapshot) {
+  if (!vehicle) {
     return (
-      <aside className="hud">
-        <div className="empty-state">Waiting for telemetry…</div>
+      <aside className="hud hud--empty">
+        <div className="empty-state">
+          <div className="empty-state__title">No vehicle selected</div>
+          <div className="empty-state__hint">
+            Click a drone on the map to inspect it.<br />
+            Right-click a drone for actions.
+          </div>
+        </div>
       </aside>
     );
   }
 
-  const { attitude, position, battery, gps, state } = snapshot;
+  const { state, snapshot, connection, name, inflightCommand } = vehicle;
+  const { attitude, position, battery, gps } = snapshot;
   const fixTypeLabel = formatFixType(gps?.fixType);
+  const banner = bannerFor(state, connection.connected);
+  const tone = bannerTone(state, connection.connected);
+
+  // Resolve who issued the inflight command (you or someone else)
+  let inflightLabel: string | null = null;
+  if (inflightCommand) {
+    const isMe = inflightCommand.sessionId === fleetStatus?.yourSessionId;
+    inflightLabel = isMe
+      ? `Sending ${inflightCommand.kind}…`
+      : `Other operator sending ${inflightCommand.kind}…`;
+  }
 
   return (
     <aside className="hud">
-      <ControlPanel />
+      <div className="hud__vehicle-header">
+        <div className="hud__vehicle-name">{name}</div>
+        <div className="hud__vehicle-id">{vehicle.vehicleId}</div>
+      </div>
 
-      <div className="hud__section-title">Vehicle</div>
-      <MetricCard label="Mode" value={state?.flightMode ?? null} precision={0} />
-      <MetricCard label="Armed" value={state ? (state.armed ? "Armed" : "Disarmed") : null} precision={0} />
-      <MetricCard label="In Air" value={state ? (state.inAir ? "Flying" : "On ground") : null} precision={0} />
+      <div className={`stage-banner stage-banner--${tone}`}>{banner}</div>
+
+      {inflightLabel && (
+        <div className="inflight-banner" title={`Started by session ${inflightCommand?.sessionId}`}>
+          <span className="inflight-banner__spinner" />
+          {inflightLabel}
+        </div>
+      )}
+
+      {lastResult && !lastResult.sent && (
+        <div className="command-error" onClick={() => dismissResult(null)}>
+          <span className="command-error__title">
+            {lastResult.errorCode === "VEHICLE_BUSY" ? "Vehicle busy" : "Command failed"}
+          </span>
+          <span className="command-error__msg">{lastResult.error ?? "Unknown error"}</span>
+          <span className="command-error__dismiss">✕</span>
+        </div>
+      )}
 
       <div className="hud__section-title">Position</div>
       <MetricCard label="Altitude" value={position?.altitudeRelative ?? null} unit="m" />

@@ -1,23 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, CommandKind, CommandResult, ServerMessage } from "@uav/types";
+import { useCallback, useEffect, useRef } from "react";
+import type {
+  ClientMessage,
+  CommandKind,
+  CommandResult,
+  ServerMessage,
+  VehicleId,
+} from "@uav/types";
 
 /**
- * Hook that opens its OWN WebSocket connection just for sending commands
- * and receiving their results.
+ * Hook that opens a dedicated WebSocket for sending commands and
+ * receiving their results.
  *
- * We use a separate socket from the telemetry stream so:
- * 1. Telemetry parsing isn't gated on command machinery
- * 2. Command results route back only to the sending client
+ * Returns a `send` function — call it with (vehicleId, kind, params)
+ * and you get a Promise that resolves with the CommandResult.
  */
 export function useCommand(url: string): {
-  send: (kind: CommandKind, params?: Record<string, number>) => Promise<CommandResult>;
-  lastResult: CommandResult | null;
-  isPending: boolean;
+  send: (
+    vehicleId: VehicleId,
+    kind: CommandKind,
+    params?: Record<string, number>
+  ) => Promise<CommandResult>;
 } {
   const wsRef = useRef<WebSocket | null>(null);
   const pendingRef = useRef(new Map<string, (result: CommandResult) => void>());
-  const [lastResult, setLastResult] = useState<CommandResult | null>(null);
-  const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,22 +42,17 @@ export function useCommand(url: string): {
             pendingRef.current.delete(msg.data.requestId);
             resolver(msg.data);
           }
-          setLastResult(msg.data);
         } catch {
-          /* ignore */
+          /* ignore non-JSON */
         }
       });
 
       ws.addEventListener("close", () => {
-        if (!cancelled) {
-          // Simple reconnect after 1 second
-          setTimeout(connect, 1000);
-        }
+        if (!cancelled) setTimeout(connect, 1000);
       });
     };
 
     connect();
-
     return () => {
       cancelled = true;
       ws?.close();
@@ -60,7 +60,11 @@ export function useCommand(url: string): {
   }, [url]);
 
   const send = useCallback(
-    (kind: CommandKind, params?: Record<string, number>): Promise<CommandResult> => {
+    (
+      vehicleId: VehicleId,
+      kind: CommandKind,
+      params?: Record<string, number>
+    ): Promise<CommandResult> => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         return Promise.reject(new Error("WebSocket not open"));
@@ -68,28 +72,25 @@ export function useCommand(url: string): {
       const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const msg: ClientMessage = {
         type: "command",
-        data: { requestId, kind, params },
+        data: { vehicleId, requestId, kind, params },
       };
 
       return new Promise<CommandResult>((resolve, reject) => {
         const timeout = setTimeout(() => {
           pendingRef.current.delete(requestId);
-          setIsPending(false);
           reject(new Error("Command timed out"));
         }, 5000);
 
         pendingRef.current.set(requestId, (result) => {
           clearTimeout(timeout);
-          setIsPending(false);
           resolve(result);
         });
 
-        setIsPending(true);
         ws.send(JSON.stringify(msg));
       });
     },
     []
   );
 
-  return { send, lastResult, isPending };
+  return { send };
 }

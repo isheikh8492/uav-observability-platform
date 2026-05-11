@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-import { useTelemetryStore } from "../stores/telemetryStore.js";
+import { useFleetStore } from "../stores/fleetStore.js";
 
 /**
  * 3D attitude indicator — a small drone model that mirrors the live roll/pitch/yaw.
@@ -92,7 +92,11 @@ export function AttitudeGauge() {
     // Animation loop — read latest attitude every frame
     let frameId = 0;
     const tick = (): void => {
-      const att = useTelemetryStore.getState().snapshot?.attitude;
+      const state = useFleetStore.getState();
+      const selected = state.selectedVehicleId
+        ? state.vehicles.get(state.selectedVehicleId)
+        : null;
+      const att = selected?.snapshot.attitude;
       if (att) {
         // PX4 NED frame: yaw = clockwise from north (Z down).
         // Three.js Y-up: rotate Y for yaw, X for pitch, Z for roll.
