@@ -60,7 +60,10 @@ export function MapPane() {
   // One marker DOM element per vehicle, tracked imperatively.
   const markersRef = useRef(new Map<VehicleId, Marker>());
   const trailsRef = useRef(new Map<VehicleId, Array<[number, number]>>());
+  /** Tentative preview pin shown during the goto-confirm step. */
   const targetMarkerRef = useRef<Marker | null>(null);
+  /** Committed targets — one per vehicle currently in enRoute state. */
+  const activeTargetsRef = useRef(new Map<VehicleId, Marker>());
 
   const vehicles = useFleetStore((s) => s.vehicles);
   const selectedId = useFleetStore((s) => s.selectedVehicleId);
@@ -94,6 +97,7 @@ export function MapPane() {
     });
 
     map.on("load", () => {
+      // Past trail — where each vehicle has been
       map.addSource("trails", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -106,6 +110,24 @@ export function MapPane() {
           "line-color": "#58a6ff",
           "line-width": 1.5,
           "line-opacity": 0.6,
+        },
+      });
+
+      // Active flight paths — drone → committed goto target. Dashed
+      // gold line to convey "planned trajectory in progress."
+      map.addSource("active-paths", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "active-paths-line",
+        type: "line",
+        source: "active-paths",
+        paint: {
+          "line-color": "#fbbf24",
+          "line-width": 2.5,
+          "line-opacity": 0.85,
+          "line-dasharray": [2, 2],
         },
       });
     });
@@ -139,6 +161,7 @@ export function MapPane() {
       mapRef.current = null;
       markersRef.current.clear();
       trailsRef.current.clear();
+      activeTargetsRef.current.clear();
     };
   }, []);
 
@@ -205,6 +228,56 @@ export function MapPane() {
       }));
       source.setData({ type: "FeatureCollection", features });
     }
+
+    // ── Reconcile active goto targets + flight path lines ──────────────────
+    // For each vehicle in enRoute state, place a target marker at the goto
+    // destination and draw a dashed line from the drone's current position
+    // to that target. When the vehicle leaves enRoute (arrival / hold / land),
+    // both the marker and the line disappear.
+    const seenTargets = new Set<VehicleId>();
+    const pathFeatures: Array<{
+      type: "Feature";
+      properties: { vehicleId: VehicleId };
+      geometry: { type: "LineString"; coordinates: Array<[number, number]> };
+    }> = [];
+
+    vehicles.forEach((vehicle, id) => {
+      if (vehicle.state.name !== "enRoute") return;
+      const pos = vehicle.snapshot.position;
+      if (!pos || Number.isNaN(pos.latitude)) return;
+      seenTargets.add(id);
+
+      const target: [number, number] = [vehicle.state.target.lon, vehicle.state.target.lat];
+
+      let marker = activeTargetsRef.current.get(id);
+      if (!marker) {
+        const el = document.createElement("div");
+        el.className = "goto-target goto-target--active";
+        marker = new maplibregl.Marker({ element: el }).setLngLat(target).addTo(map);
+        activeTargetsRef.current.set(id, marker);
+      } else {
+        marker.setLngLat(target);
+      }
+
+      pathFeatures.push({
+        type: "Feature",
+        properties: { vehicleId: id },
+        geometry: {
+          type: "LineString",
+          coordinates: [[pos.longitude, pos.latitude], target],
+        },
+      });
+    });
+
+    for (const [id, marker] of activeTargetsRef.current.entries()) {
+      if (!seenTargets.has(id)) {
+        marker.remove();
+        activeTargetsRef.current.delete(id);
+      }
+    }
+
+    const pathSource = map.getSource("active-paths") as maplibregl.GeoJSONSource | undefined;
+    pathSource?.setData({ type: "FeatureCollection", features: pathFeatures });
   }, [vehicles, selectedId, selectVehicle]);
 
   // ── Render goto target preview ────────────────────────────────────────────
@@ -276,26 +349,45 @@ export function MapPane() {
     menuPosition = { x: overlay.x, y: overlay.y };
     menuHeader = `${activeVehicle.name} · ${bannerFor(activeVehicle.state, activeVehicle.connection.connected)}`;
     const actions = vehicleActions(activeVehicle.state);
-    menuItems = actions.map((a: VehicleAction) => ({
-      key: a.key,
-      label: a.label,
-      description: a.description,
-      variant: a.variant,
-      onClick: () => {
-        if (a.requiresInput === "altitude") {
-          setOverlay({
-            type: "altitudePrompt",
-            kind: "takeoff",
-            x: overlay.x,
-            y: overlay.y,
-            vehicleId: overlay.vehicleId,
-          });
-        } else {
-          handleCommand(overlay.vehicleId, a.key);
-          dismiss();
-        }
-      },
-    }));
+    if (actions.length === 0) {
+      // Transient state (arming, takingOff, etc.) — keep the menu mounted
+      // with a single disabled placeholder so it doesn't flicker.
+      menuItems = [
+        {
+          key: "_pending",
+          label: "Command in progress…",
+          description: "Waiting for vehicle to reach next state",
+          disabled: true,
+          onClick: () => undefined,
+        },
+      ];
+    } else {
+      menuItems = actions.map((a: VehicleAction) => ({
+        key: a.key,
+        label: a.label,
+        description: a.description,
+        variant: a.variant,
+        onClick: () => {
+          if (a.requiresInput === "altitude") {
+            // Transition to the altitude prompt — vehicle menu naturally
+            // unmounts because overlay.type changes.
+            setOverlay({
+              type: "altitudePrompt",
+              kind: "takeoff",
+              x: overlay.x,
+              y: overlay.y,
+              vehicleId: overlay.vehicleId,
+            });
+          } else {
+            // Fire-and-stay-open: command goes out, menu stays put so the
+            // operator can immediately chain the next action (e.g., Arm →
+            // Takeoff right after). The menu re-renders with the new
+            // state's actions because the FSM has moved forward.
+            handleCommand(overlay.vehicleId, a.key);
+          }
+        },
+      }));
+    }
   } else if (overlay.type === "mapMenu" && activeVehicle) {
     menuPosition = { x: overlay.x, y: overlay.y };
     menuHeader = `${activeVehicle.name}`;
@@ -410,6 +502,29 @@ function createDroneMarkerEl(
   const el = document.createElement("div");
   el.className = "drone-marker";
   el.dataset["vehicleId"] = id;
+
+  // Top-down quadcopter SVG. Inline so it inherits the marker's rotation
+  // (MapLibre's rotationAlignment="map" rotates the whole element to
+  // match the drone's heading). The orange nose triangle at the top is
+  // the heading indicator.
+  el.innerHTML = `
+    <div class="drone-marker__halo"></div>
+    <svg class="drone-marker__body" viewBox="-24 -24 48 48" xmlns="http://www.w3.org/2000/svg">
+      <!-- Arms (X-pattern) -->
+      <line x1="-14" y1="-14" x2="14"  y2="14"  class="drone-marker__arm" />
+      <line x1="14"  y1="-14" x2="-14" y2="14"  class="drone-marker__arm" />
+      <!-- Rotors -->
+      <circle cx="-14" cy="-14" r="5" class="drone-marker__rotor" />
+      <circle cx="14"  cy="-14" r="5" class="drone-marker__rotor" />
+      <circle cx="-14" cy="14"  r="5" class="drone-marker__rotor" />
+      <circle cx="14"  cy="14"  r="5" class="drone-marker__rotor" />
+      <!-- Center body -->
+      <circle cx="0" cy="0" r="6" class="drone-marker__hub" />
+      <!-- Nose / heading indicator -->
+      <polygon points="0,-22 -5,-13 5,-13" class="drone-marker__nose" />
+    </svg>
+  `;
+
   el.addEventListener("click", (ev) => {
     ev.stopPropagation();
     onSelect();

@@ -117,27 +117,81 @@ body {
   letter-spacing: 0.04em;
 }
 
-/* Drone marker (custom HTML markers on map) */
+/* Drone marker — top-down quadcopter SVG
+   ─────────────────────────────────────
+   Designed to NOT blend with the OSM tile palette (lots of blue POI markers).
+   Strategy: warm-accented body + dark stroke + soft halo. Visible on satellite,
+   street, and terrain styles. Rotates to match drone heading via MapLibre's
+   rotationAlignment="map". */
 .drone-marker {
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-bottom: 16px solid #7d8590;
-  filter: drop-shadow(0 0 4px rgba(125, 133, 144, 0.6));
-  transform-origin: 50% 67%;
+  position: relative;
+  width: 44px;
+  height: 44px;
   cursor: pointer;
-  transition: filter 120ms, border-bottom-color 120ms;
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  transition: filter 120ms;
 }
-.drone-marker:hover {
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.6));
-}
-.drone-marker--selected {
-  border-bottom-color: #58a6ff;
-  filter: drop-shadow(0 0 8px rgba(88, 166, 255, 0.9));
+.drone-marker:hover { filter: drop-shadow(0 2px 6px rgba(255, 255, 255, 0.7)); }
+
+.drone-marker__body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-/* Goto target preview marker */
+/* Arms — thin dark lines */
+.drone-marker__arm {
+  stroke: #1f2937;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+/* Rotors — light fill, dark stroke (very high contrast) */
+.drone-marker__rotor {
+  fill: #f0f6fc;
+  stroke: #1f2937;
+  stroke-width: 2;
+}
+/* Center hub — accent color, identifies "this is a drone" at a glance */
+.drone-marker__hub {
+  fill: #f97316;       /* warm orange — pops on any OSM tile */
+  stroke: #1f2937;
+  stroke-width: 2;
+}
+/* Nose — same warm color, points forward */
+.drone-marker__nose {
+  fill: #f97316;
+  stroke: #1f2937;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* Halo — soft circle behind the drone, distinguishes from POI markers */
+.drone-marker__halo {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.25) 0%, rgba(249, 115, 22, 0) 70%);
+  transition: background 200ms;
+  pointer-events: none;
+}
+
+/* Selected state — brighter accent + pulsing halo */
+.drone-marker--selected .drone-marker__hub,
+.drone-marker--selected .drone-marker__nose {
+  fill: #fbbf24;   /* warm gold for selected — even more pop */
+}
+.drone-marker--selected .drone-marker__halo {
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.45) 0%, rgba(251, 191, 36, 0) 70%);
+  animation: drone-halo-pulse 1.6s ease-in-out infinite;
+}
+@keyframes drone-halo-pulse {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.25); opacity: 0.55; }
+}
+
+/* Goto target — preview (during confirm step): pulsing tentative pin */
 .goto-target {
   width: 16px;
   height: 16px;
@@ -149,7 +203,20 @@ body {
 }
 @keyframes target-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  50% { transform: translate(-50%, -50%) scale(1.35); opacity: 0.55; }
+  50%      { transform: translate(-50%, -50%) scale(1.35); opacity: 0.55; }
+}
+
+/* Active target — drone is currently flying to this point. Bullseye style,
+   matches the dashed gold line we draw from drone → target. */
+.goto-target--active {
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.35);
+  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15);
+  animation: target-active-pulse 1.8s ease-in-out infinite;
+}
+@keyframes target-active-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15); }
+  50%      { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
 }
 
 /* Context menu (right-click) */
@@ -204,6 +271,26 @@ body {
 .context-menu__item--destructive:hover:not(:disabled) {
   background: rgba(248, 81, 73, 0.1);
 }
+
+/* Destructive action awaiting second-click confirmation */
+.context-menu__item--pending-confirm {
+  background: rgba(248, 81, 73, 0.18) !important;
+  border: 1px solid rgba(248, 81, 73, 0.5);
+  animation: pending-confirm-pulse 1s ease-in-out infinite;
+}
+@keyframes pending-confirm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
+  50%      { box-shadow: 0 0 0 4px rgba(248, 81, 73, 0); }
+}
+
+/* Just-clicked visual feedback — quick flash so the operator sees it registered */
+.context-menu__item--just-clicked {
+  animation: just-clicked-flash 280ms ease-out;
+}
+@keyframes just-clicked-flash {
+  0%   { background: rgba(255, 255, 255, 0.35); }
+  100% { background: transparent; }
+}
 .context-menu__label { font-weight: 500; }
 .context-menu__desc {
   font-size: 11px;
@@ -249,6 +336,16 @@ body {
   width: 80px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  /* Hide the browser's default up/down chevron spinners — they're ugly
+     and clash with the rest of the UI. Operator types or scrolls instead. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.prompt__input::-webkit-outer-spin-button,
+.prompt__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
 }
 .prompt__unit {
   font-size: 11px;

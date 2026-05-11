@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ContextMenuItem {
   key: string;
@@ -19,18 +19,76 @@ interface ContextMenuProps {
   onDismiss: () => void;
 }
 
+/** How long destructive actions wait for a second click before resetting. */
+const DESTRUCTIVE_CONFIRM_WINDOW_MS = 2000;
+/** How long the "just clicked" visual pulse stays on. */
+const CLICK_FEEDBACK_MS = 280;
+
 /**
  * A floating action menu anchored at a viewport position.
  *
- * Dismisses on:
- *   - Click outside
- *   - Escape key
- *   - Item selection
- *
- * Auto-flips horizontally if it would overflow the right edge.
+ * Behaviors:
+ *   - Dismisses on click outside or Escape key
+ *   - Auto-flips horizontally if it would overflow the right edge
+ *   - Destructive items (Land, Disarm, …) require a SECOND click within 2s
+ *     to fire — protects against spam-clicking and accidental aborts of
+ *     in-progress maneuvers
+ *   - Every click pulses the item briefly so the operator sees it registered
  */
 export function ContextMenu({ x, y, items, header, onDismiss }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+
+  /** Key of destructive item awaiting a second-click confirmation. */
+  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
+  /** Seconds remaining for the pending confirm to expire. */
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  /** Key of item that was just clicked (for visual flash). */
+  const [justClicked, setJustClicked] = useState<string | null>(null);
+
+  // Pending-confirm countdown + auto-expire
+  useEffect(() => {
+    if (!pendingConfirm) return;
+    setSecondsLeft(Math.ceil(DESTRUCTIVE_CONFIRM_WINDOW_MS / 1000));
+    const tick = window.setInterval(() => {
+      setSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    const expire = window.setTimeout(() => {
+      setPendingConfirm(null);
+      setSecondsLeft(0);
+    }, DESTRUCTIVE_CONFIRM_WINDOW_MS);
+    return () => {
+      window.clearInterval(tick);
+      window.clearTimeout(expire);
+    };
+  }, [pendingConfirm]);
+
+  const handleItemClick = (item: ContextMenuItem): void => {
+    if (item.disabled) return;
+
+    // Visual click feedback for every click
+    setJustClicked(item.key);
+    window.setTimeout(() => {
+      setJustClicked((prev) => (prev === item.key ? null : prev));
+    }, CLICK_FEEDBACK_MS);
+
+    // Destructive confirmation: first click arms, second click fires
+    if (item.variant === "destructive") {
+      if (pendingConfirm === item.key) {
+        // Confirmed — fire and reset
+        setPendingConfirm(null);
+        item.onClick();
+        return;
+      }
+      // First press on a destructive: arm confirmation, don't fire yet
+      setPendingConfirm(item.key);
+      return;
+    }
+
+    // Non-destructive: fire immediately and clear any pending confirmation
+    // (operator changed their mind / picked a different action).
+    setPendingConfirm(null);
+    item.onClick();
+  };
 
   useEffect(() => {
     const onDocPointer = (e: PointerEvent): void => {
@@ -72,25 +130,45 @@ export function ContextMenu({ x, y, items, header, onDismiss }: ContextMenuProps
   return (
     <div ref={ref} className="context-menu" style={style} role="menu">
       {header && <div className="context-menu__header">{header}</div>}
-      {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          role="menuitem"
-          disabled={item.disabled}
-          className={`context-menu__item context-menu__item--${item.variant ?? "default"}`}
-          onClick={() => {
-            item.onClick();
-            onDismiss();
-          }}
-          title={item.description}
-        >
-          <span className="context-menu__label">{item.label}</span>
-          {item.description && (
-            <span className="context-menu__desc">{item.description}</span>
-          )}
-        </button>
-      ))}
+      {items.map((item) => {
+        const isPending = pendingConfirm === item.key;
+        const isFlashing = justClicked === item.key;
+        const classes = [
+          "context-menu__item",
+          `context-menu__item--${item.variant ?? "default"}`,
+          isPending && "context-menu__item--pending-confirm",
+          isFlashing && "context-menu__item--just-clicked",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            role="menuitem"
+            disabled={item.disabled}
+            className={classes}
+            // We do NOT auto-dismiss after click. The action's onClick decides —
+            // fire-and-stay-open for single commands, or change overlay state for
+            // prompts (the menu unmounts naturally). Outside-click and Escape
+            // still dismiss via the document handlers above.
+            onClick={() => handleItemClick(item)}
+            title={item.description}
+          >
+            <span className="context-menu__label">
+              {isPending ? `Click again to confirm: ${item.label}` : item.label}
+            </span>
+            {isPending ? (
+              <span className="context-menu__desc">
+                Expires in {secondsLeft}s · click elsewhere to cancel
+              </span>
+            ) : item.description ? (
+              <span className="context-menu__desc">{item.description}</span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
