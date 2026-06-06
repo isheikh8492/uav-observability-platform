@@ -27,10 +27,14 @@ import { createMavLinkListener } from "./mavlink/listener.js";
 import { startHeartbeat } from "./mavlink/heartbeat.js";
 import { TelemetryWebSocketServer } from "./websocket/server.js";
 import { logger } from "./util/logger.js";
+import { GeospatialVideoSource } from "./video/geospatialVideoSource.js";
 
 logger.info("[backend] starting UAV telemetry backend");
 logger.info("[backend] log file:", logger.filePath());
-logger.info("[backend] config:", config);
+logger.info("[backend] config:", {
+  ...config,
+  mapboxAccessToken: config.mapboxAccessToken ? "[configured]" : "[missing]",
+});
 
 // 1. Fleet — currently one vehicle but the model supports many.
 const fleet = new FleetService();
@@ -67,6 +71,11 @@ const stopHeartbeat = startHeartbeat({
 
 // 5. WebSocket server
 const wsServer = new TelemetryWebSocketServer(config.wsPort);
+const videoSource = new GeospatialVideoSource({
+  accessToken: config.mapboxAccessToken,
+  style: config.mapboxStyle,
+  enabled: config.cameraEnabled,
+});
 
 wsServer.on("clientMessage", (msg, client, clientSession) => {
   if (msg.type !== "command") return;
@@ -144,10 +153,34 @@ const broadcastInterval = setInterval(() => {
   }
 }, 1000 / config.broadcastHz);
 
-// 7. Graceful shutdown
+// 7. Synthetic camera loop — lower-rate, image-bearing stream.
+let cameraTickInFlight = false;
+const cameraInterval = setInterval(() => {
+  if (wsServer.clientCount === 0 || cameraTickInFlight) return;
+  cameraTickInFlight = true;
+
+  void (async () => {
+    try {
+      for (const session of fleet.list()) {
+        const frame = await videoSource.frameFor(session.payload());
+        wsServer.broadcast({
+          type: "camera_frame",
+          data: frame,
+        });
+      }
+    } catch (err) {
+      logger.error("[camera] failed to publish frame:", err);
+    } finally {
+      cameraTickInFlight = false;
+    }
+  })();
+}, 1000 / config.cameraHz);
+
+// 8. Graceful shutdown
 async function shutdown(signal: string): Promise<void> {
   logger.info(`[backend] received ${signal}, shutting down...`);
   clearInterval(broadcastInterval);
+  clearInterval(cameraInterval);
   stopHeartbeat();
   socket.close();
   await wsServer.close();

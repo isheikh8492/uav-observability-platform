@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  CameraFrame,
   CommandResult,
   FleetStatus,
   VehicleId,
@@ -14,6 +15,7 @@ import type {
  */
 interface FleetState {
   vehicles: Map<VehicleId, VehiclePayload>;
+  cameraFrames: Map<VehicleId, CameraFrame>;
   selectedVehicleId: VehicleId | null;
 
   /** Fleet-wide status (number of operators, their session IDs). */
@@ -23,6 +25,7 @@ interface FleetState {
   lastCommandResult: CommandResult | null;
 
   upsertVehicle: (payload: VehiclePayload) => void;
+  setCameraFrame: (frame: CameraFrame) => void;
   setFleetStatus: (status: FleetStatus) => void;
   setLastCommandResult: (result: CommandResult | null) => void;
   selectVehicle: (vehicleId: VehicleId) => void;
@@ -31,6 +34,7 @@ interface FleetState {
 
 export const useFleetStore = create<FleetState>((set) => ({
   vehicles: new Map(),
+  cameraFrames: new Map(),
   selectedVehicleId: null,
   fleetStatus: null,
   lastCommandResult: null,
@@ -44,6 +48,13 @@ export const useFleetStore = create<FleetState>((set) => ({
         // Auto-select the first vehicle that appears.
         selectedVehicleId: state.selectedVehicleId ?? payload.vehicleId,
       };
+    }),
+
+  setCameraFrame: (frame) =>
+    set((state) => {
+      const next = new Map(state.cameraFrames);
+      next.set(frame.vehicleId, frame);
+      return { cameraFrames: next };
     }),
 
   setFleetStatus: (status) =>
@@ -66,4 +77,11 @@ export function useSelectedVehicle(): VehiclePayload | null {
   const selectedId = useFleetStore((s) => s.selectedVehicleId);
   const vehicle = useFleetStore((s) => (selectedId ? s.vehicles.get(selectedId) : null));
   return vehicle ?? null;
+}
+
+/** Selector hook for the currently-selected vehicle's camera frame. */
+export function useSelectedCameraFrame(): CameraFrame | null {
+  const selectedId = useFleetStore((s) => s.selectedVehicleId);
+  const frame = useFleetStore((s) => (selectedId ? s.cameraFrames.get(selectedId) : null));
+  return frame ?? null;
 }

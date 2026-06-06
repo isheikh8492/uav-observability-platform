@@ -11,6 +11,7 @@ import { useFleetStore } from "../stores/fleetStore.js";
  */
 export function useTelemetry(url: string): void {
   const upsertVehicle = useFleetStore((s) => s.upsertVehicle);
+  const setCameraFrame = useFleetStore((s) => s.setCameraFrame);
   const setFleetStatus = useFleetStore((s) => s.setFleetStatus);
 
   useEffect(() => {
@@ -33,6 +34,8 @@ export function useTelemetry(url: string): void {
           const msg = JSON.parse(event.data as string) as ServerMessage;
           if (msg.type === "vehicle") {
             upsertVehicle(msg.data);
+          } else if (msg.type === "camera_frame") {
+            setCameraFrame(msg.data);
           } else if (msg.type === "fleet_status") {
             setFleetStatus(msg.data);
           } else if (msg.type === "error") {
@@ -63,5 +66,5 @@ export function useTelemetry(url: string): void {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, [url, upsertVehicle, setFleetStatus]);
+  }, [url, upsertVehicle, setCameraFrame, setFleetStatus]);
 }

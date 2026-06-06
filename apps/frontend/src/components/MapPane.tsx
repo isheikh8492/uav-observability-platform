@@ -22,6 +22,7 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu.js";
 import { AltitudePrompt } from "./AltitudePrompt.js";
 
 const WS_URL = import.meta.env["VITE_WS_URL"] ?? "ws://localhost:8080";
+const DEFAULT_HOME: [number, number] = [-86.91079756199419, 40.45709332552164];
 
 /**
  * Possible interactive overlays on top of the map.
@@ -60,6 +61,7 @@ export function MapPane() {
   // One marker DOM element per vehicle, tracked imperatively.
   const markersRef = useRef(new Map<VehicleId, Marker>());
   const trailsRef = useRef(new Map<VehicleId, Array<[number, number]>>());
+  const hasCenteredOnVehicleRef = useRef(false);
   /** Tentative preview pin shown during the goto-confirm step. */
   const targetMarkerRef = useRef<Marker | null>(null);
   /** Committed targets — one per vehicle currently in enRoute state. */
@@ -92,7 +94,7 @@ export function MapPane() {
         },
         layers: [{ id: "osm", type: "raster", source: "osm" }],
       },
-      center: [8.5456, 47.3977], // PX4 default home
+      center: DEFAULT_HOME,
       zoom: 16,
     });
 
@@ -178,6 +180,11 @@ export function MapPane() {
       if (!position || Number.isNaN(position.latitude)) return;
       const lngLat: [number, number] = [position.longitude, position.latitude];
       const heading = position.heading;
+
+      if (!hasCenteredOnVehicleRef.current) {
+        map.jumpTo({ center: lngLat, zoom: Math.max(map.getZoom(), 16) });
+        hasCenteredOnVehicleRef.current = true;
+      }
 
       let marker = markersRef.current.get(id);
       if (!marker) {

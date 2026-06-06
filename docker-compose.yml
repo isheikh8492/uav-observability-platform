@@ -14,9 +14,9 @@ services:
       # Telemetry receive port - reserved for backend/QGC bidirectional comms
       - "14550:14550/udp"
     environment:
-      - PX4_HOME_LAT=47.3977
-      - PX4_HOME_LON=8.5456
-      - PX4_HOME_ALT=488
+      - PX4_HOME_LAT=40.45709332552164
+      - PX4_HOME_LON=-86.91079756199419
+      - PX4_HOME_ALT=185
       # Selects SIH quadcopter airframe (10040) - clears preflight warnings
       # SIH = Simulator-In-Hardware (headless, no Gazebo needed)
       # See airframes list: /px4/build/px4_sitl_default/etc/init.d-posix/airframes/

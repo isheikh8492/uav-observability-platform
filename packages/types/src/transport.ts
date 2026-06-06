@@ -102,12 +102,33 @@ export interface FleetStatus {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Geospatial synthetic camera
+
+/** Latest synthetic camera image and metadata for one vehicle. */
+export interface CameraFrame {
+  vehicleId: VehicleId;
+  timestamp: number;
+  status: "live" | "unavailable";
+  provider: "mapbox" | "none";
+  imageDataUrl?: string;
+  latitude: number | null;
+  longitude: number | null;
+  altitudeMsl: number | null;
+  altitudeRelative: number | null;
+  heading: number | null;
+  zoom: number | null;
+  bearing: number | null;
+  reason?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Message envelopes
 
 /** Backend → Frontend message envelope. */
 export type ServerMessage =
   | { type: "vehicle"; data: VehiclePayload }
   | { type: "fleet_status"; data: FleetStatus }
+  | { type: "camera_frame"; data: CameraFrame }
   | { type: "command_result"; data: CommandResult }
   | { type: "error"; data: { message: string; code?: string } };
 

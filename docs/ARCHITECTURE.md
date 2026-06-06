@@ -421,27 +421,27 @@ We mirror this architecture deliberately:
 - [x] Resource limits set (1GB memory cap, restart policy)
 - [x] Telemetry validated end-to-end with QGroundControl
 
-### Phase 1: MVP Backend & Frontend (Next)
-- [ ] Initialize monorepo structure & root configuration
-- [ ] Set up `packages/types` with core telemetry interfaces
-- [ ] Build backend: UDP listener → MAVLink parser → WebSocket broadcaster
-- [ ] Build frontend: WebSocket client → dashboard components
-  - [ ] Map pane (Mapbox 2D with drone marker, flight path)
-  - [ ] Telemetry HUD (speed, altitude, battery, mode, GPS lock)
-  - [ ] Mini attitude indicator widget (Three.js gauge)
-  - [ ] Connection status indicators
-- [ ] Test end-to-end: PX4 SITL → backend → frontend
+### Phase 1: MVP Backend & Frontend ✅
+- [x] Initialize monorepo structure & root configuration
+- [x] Set up `packages/types` with core telemetry interfaces
+- [x] Build backend: UDP listener → MAVLink parser → WebSocket broadcaster
+- [x] Build frontend: WebSocket client → dashboard components
+  - [x] Map pane with drone marker, flight path, and goto target overlays
+  - [x] Telemetry HUD (speed, altitude, battery, mode, GPS lock)
+  - [x] Mini attitude indicator widget
+  - [x] Connection status indicators
+- [x] Test end-to-end: PX4 SITL → backend → frontend
 
-### Phase 1B: Geospatial Synthetic Camera
-- [ ] Mapbox account + Static Images API integration
-- [ ] Backend: GeospatialVideoSource service
-  - [ ] Fetch tile at current GPS coords
-  - [ ] Altitude → zoom mapping
-  - [ ] Heading → bearing rotation
-  - [ ] In-memory tile cache (dedupe API calls)
-- [ ] Frontend: Camera pane component
-  - [ ] HUD overlays (speed, altitude, heading, LIVE indicator)
-- [ ] Define `VideoSource` interface (replaceable for Phase 3)
+### Phase 1B: Geospatial Synthetic Camera ✅
+- [x] Mapbox Static Images API integration with no-token fallback
+- [x] Backend: GeospatialVideoSource service
+  - [x] Fetch tile at current GPS coords
+  - [x] Altitude → zoom mapping
+  - [x] Heading → bearing rotation
+  - [x] In-memory tile cache (dedupe API calls)
+- [x] Frontend: Camera pane component
+  - [x] HUD overlays (altitude, heading, provider, LIVE indicator)
+- [x] Define `VideoSource` interface (replaceable for Phase 3)
 
 ### Phase 2: Replay & Analysis
 - [ ] Read ULog files from PX4

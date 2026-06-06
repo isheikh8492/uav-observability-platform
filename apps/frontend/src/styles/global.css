@@ -566,6 +566,112 @@ body {
   font-weight: 400;
 }
 
+/* Geospatial synthetic camera */
+.camera-pane {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.camera-pane__viewport {
+  position: relative;
+  width: 100%;
+  height: 190px;
+  aspect-ratio: 16 / 9;
+  background: #010409;
+}
+.camera-pane__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-pane__placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 20px;
+  text-align: center;
+  color: #7d8590;
+}
+.camera-pane__placeholder-title {
+  color: #c9d1d9;
+  font-size: 13px;
+  font-weight: 700;
+}
+.camera-pane__placeholder-reason,
+.camera-pane__message {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.camera-pane__live-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: rgba(1, 4, 9, 0.78);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.35);
+}
+.camera-pane--live .camera-pane__live-badge {
+  color: #56d364;
+  border-color: rgba(86, 211, 100, 0.35);
+}
+.camera-pane__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.camera-pane--live .camera-pane__dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+.camera-pane__meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid #30363d;
+}
+.camera-pane__meta-item {
+  min-width: 0;
+  padding: 8px;
+  border-right: 1px solid #30363d;
+}
+.camera-pane__meta-item:nth-child(3n) {
+  border-right: 0;
+}
+.camera-pane__meta-item span,
+.camera-pane__status {
+  display: block;
+  color: #7d8590;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.camera-pane__meta-item strong {
+  display: block;
+  margin-top: 3px;
+  color: #f0f6fc;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.camera-pane--empty {
+  padding: 16px;
+}
+
 /* Attitude gauge */
 .attitude-gauge {
   width: 100%;

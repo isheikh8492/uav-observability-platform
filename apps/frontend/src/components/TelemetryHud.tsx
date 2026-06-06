@@ -2,6 +2,7 @@ import { useFleetStore, useSelectedVehicle } from "../stores/fleetStore.js";
 import { bannerFor, bannerTone } from "../lib/vehicleActions.js";
 import { MetricCard } from "./MetricCard.js";
 import { AttitudeGauge } from "./AttitudeGauge.js";
+import { CameraPane } from "./CameraPane.js";
 
 /** Right-side panel showing the selected vehicle's live telemetry. */
 export function TelemetryHud() {
@@ -47,6 +48,9 @@ export function TelemetryHud() {
       </div>
 
       <div className={`stage-banner stage-banner--${tone}`}>{banner}</div>
+
+      <div className="hud__section-title">Camera</div>
+      <CameraPane />
 
       {inflightLabel && (
         <div className="inflight-banner" title={`Started by session ${inflightCommand?.sessionId}`}>
